@@ -71,9 +71,10 @@ class RandomHistory(object):
 
 class RandomSpider(object):
     def __init__(
-        self, seed='https://slashdot.com', history_size=10000, clear_cookie_period=10000, timeout=10,
-        steps_at_a_time=3, verbose=False
+        self, seed='https://en.wikipedia.org/wiki/Main_Page', history_size=10000, clear_cookie_period=10000,
+        timeout=10, steps_at_a_time=3, verbose=False
     ):
+        self.seed = seed
         self.timeout = timeout
         self.link_getter = LinkGetter(timeout=self.timeout)
         self.history = RandomHistory(history_size)
@@ -124,10 +125,13 @@ class RandomSpider(object):
 
     def crawl_forever(self):
         while True:
+            if random.random() < 0.1:
+                self.history.add(self.seed)  # Reseed periodically.
             if random.random() < 1. / self.clear_cookie_period:
                 self.clear_cookies()
             try:
-                print('steps: {}, history: {}'.format(self.step_counter, len(self.history)))
+                if self.verbose:
+                    print('steps: {}, history: {}'.format(self.step_counter, len(self.history)))
                 self.crawl_steps(self.steps_at_a_time)
             except Exception:
                 traceback.print_exc()
