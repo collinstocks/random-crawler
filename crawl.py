@@ -105,6 +105,8 @@ class RandomSpider(object):
         from_url_netloc = self.get_netloc(from_url or url)
         self.step_counter += 1
         url, links = self.link_getter.get_links(url)
+        if self.verbose:
+            print('visited', url)
 
         if from_url:
             # Add url to history after a successful visit.
