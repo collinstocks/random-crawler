@@ -24,12 +24,13 @@ class Opener(object):
 class LinkGetter(Opener):
     def get_links(self, url):
         with self.open(url) as response:
+            url = response.geturl()
             doc = response.read(1000000)
         soup = BeautifulSoup(doc, 'html.parser')
         rel_links = {tag['href'] for tag in soup.find_all('a') if tag.get('href')}
         abs_links = {urllib.parse.urljoin(url, rel_link) for rel_link in rel_links}
         http_links = {url for url in abs_links if urllib.parse.urlsplit(url).scheme.lower() in ['http', 'https']}
-        return http_links
+        return url, http_links
 
 
 class RandomHistory(object):
@@ -49,9 +50,8 @@ class RandomHistory(object):
             return
         if len(self.history) == self.history_size:
             index = random.randrange(self.history_size)
-            del self.history_dict[self.history[index]]
-            self.history[index] = item
-            self.history_dict[item] = index
+            old_item = self.history[index]
+            self.replace(old_item, item)
         else:
             self.history_dict[item] = len(self.history)
             self.history.append(item)
@@ -70,9 +70,20 @@ class RandomHistory(object):
 
 
 class RandomSpider(object):
+    @staticmethod
+    def get_netloc(url):
+        split_netloc = urllib.parse.urlsplit(url).netloc.split('.')
+        split_netloc.reverse()
+        filtered_split_netloc = [split_netloc.pop(0)]
+        for part in split_netloc:
+            filtered_split_netloc.append(part)
+            if len(part) > 3:
+                break
+        return '.'.join(reversed(filtered_split_netloc))
+
     def __init__(
         self, seed='https://en.wikipedia.org/wiki/Main_Page', history_size=10000, clear_cookie_period=10000,
-        timeout=10, steps_at_a_time=3, verbose=False
+        timeout=10, steps_at_a_time=5, verbose=False
     ):
         self.seed = seed
         self.timeout = timeout
@@ -87,45 +98,36 @@ class RandomSpider(object):
     def clear_cookies(self):
         self.link_getter = LinkGetter(timeout=self.timeout)
 
-    def visit(self, url):
+    def visit(self, url, from_url=None):
         if self.verbose:
             print('visiting', url)
         url = url.split('#')[0]
-        url_netloc = urllib.parse.urlsplit(url).netloc
+        from_url_netloc = self.get_netloc(from_url or url)
         self.step_counter += 1
-        links = list(self.link_getter.get_links(url))
-        internal_links = set()
-        external_links = set()
-        for link in links:
-            link = link.split('#')[0]
-            if link == url:
-                continue
-            link_netloc = urllib.parse.urlsplit(link).netloc
-            if url_netloc == link_netloc:
-                internal_links.add(link)
+        url, links = self.link_getter.get_links(url)
+
+        if from_url:
+            # Add url to history after a successful visit.
+            if self.get_netloc(url) == from_url_netloc:
+                self.history.replace(from_url, url)
             else:
-                external_links.add(link)
-        return internal_links, external_links
+                self.history.add(url)
+
+        return links
 
     def crawl_steps(self, steps):
         url = self.history.get()
-        internal_links, external_links = self.visit(url)
+        links = list(self.visit(url))
+        from_url = url
         for i in range(steps):
-            if len(internal_links) and random.random() < 0.5:
-                next_url = random.choice(list(internal_links))
-                internal_links, external_links = self.visit(next_url)
-                self.history.replace(url, next_url)  # Add to history after successful visit.
-                url = next_url
-            elif len(external_links):
-                next_url = random.choice(list(external_links))
-                internal_links, external_links = self.visit(next_url)
-                self.history.add(next_url)
-                url = next_url
+            url = random.choice(links)
+            links = list(self.visit(url, from_url))
+            from_url = url
         return url
 
     def crawl_forever(self):
         while True:
-            if random.random() < 0.1:
+            if random.random() < 0.01:
                 self.history.add(self.seed)  # Reseed periodically.
             if random.random() < 1. / self.clear_cookie_period:
                 self.clear_cookies()
